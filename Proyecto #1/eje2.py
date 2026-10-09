@@ -6,7 +6,6 @@ from PIL import Image
 
 
 def detectar_bloques(imagen_pil, solo_oscuros):
-    """Devuelve los 4 bloques mas grandes de la imagen, de izquierda a derecha."""
     gris = cv2.cvtColor(np.array(imagen_pil), cv2.COLOR_RGB2GRAY)
     mascara = (gris < 60) if solo_oscuros else (gris < 245)
     mascara = mascara.astype(np.uint8) * 255
@@ -21,7 +20,7 @@ def detectar_bloques(imagen_pil, solo_oscuros):
 figuras = Image.open("figuras.png").convert("RGB")
 plantilla = Image.open("plantilla.png").convert("RGB")
 
-# 2) Recortar f1..f4 de la imagen de figuras
+# 2) Recortar f1..f4 de la imagen de figuras    
 fotos = []
 for c in detectar_bloques(figuras, solo_oscuros=False):
     x, y, w, h = cv2.boundingRect(c)

@@ -1,4 +1,4 @@
-import cv2
+import cv2 #nos sirver para leer la imagen y procesarla
 import numpy as np
 
 # 1) Cargar imagen y pasar a gris
@@ -24,7 +24,7 @@ for nombre, c in zip(vocales, contornos):
     cv2.drawContours(mascara, [c], -1, 255, cv2.FILLED)
     mascara = cv2.bitwise_and(mascara, bw)
 
-    momentos = cv2.moments(mascara, binaryImage=True)
+    momentos = cv2.moments(mascara, binaryImage=True) # calcular momentos
     hu = cv2.HuMoments(momentos).flatten()
     hu = np.where(hu == 0, 1e-30, hu)          # evita log(0) en letras simetricas
     log_hu = -np.sign(hu) * np.log10(np.abs(hu))
