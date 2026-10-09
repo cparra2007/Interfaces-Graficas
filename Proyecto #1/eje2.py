@@ -1,98 +1,67 @@
-
 import math
-import sys
 import cv2
 import numpy as np
 import pygame
 from PIL import Image
 
-FIGURAS = "figuras.png"
-PLANTILLA = "plantilla.png"
-SALIDA = "salida.png"
+
+def detectar_bloques(imagen_pil, solo_oscuros):
+    """Devuelve los 4 bloques mas grandes de la imagen, de izquierda a derecha."""
+    gris = cv2.cvtColor(np.array(imagen_pil), cv2.COLOR_RGB2GRAY)
+    mascara = (gris < 60) if solo_oscuros else (gris < 245)
+    mascara = mascara.astype(np.uint8) * 255
+    # apertura: borra marcos, ejes y texto; deja solo los bloques grandes
+    mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, np.ones((25, 25), np.uint8))
+    contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contornos = sorted(contornos, key=cv2.contourArea, reverse=True)[:4]
+    return sorted(contornos, key=lambda c: cv2.boundingRect(c)[0])
 
 
+# 1) Importar figuras y plantilla (PIL)
+figuras = Image.open("figuras.png").convert("RGB")
+plantilla = Image.open("plantilla.png").convert("RGB")
 
-def abrir_rgb(ruta):
-    try:
-        im = Image.open(ruta).convert("RGBA")
-    except FileNotFoundError:
-        sys.exit(f"No encuentro '{ruta}' en la carpeta del script.")
-    fondo = Image.new("RGBA", im.size, (255, 255, 255, 255))
-    fondo.alpha_composite(im)
-    return fondo.convert("RGB")
+# 2) Recortar f1..f4 de la imagen de figuras
+fotos = []
+for c in detectar_bloques(figuras, solo_oscuros=False):
+    x, y, w, h = cv2.boundingRect(c)
+    fotos.append(figuras.crop((x, y, x + w, y + h)))
 
+# 3) Ubicar los 4 cuadrados negros de la plantilla
+cuadrados = detectar_bloques(plantilla, solo_oscuros=True)
 
-def detectar_bloques(pil_img, solo_oscuros, n=4, k=25):
+# 4) Redimensionar, rotar y pegar cada foto en su cuadrado
+for foto, c in zip(fotos, cuadrados):
+    caja = cv2.boxPoints(cv2.minAreaRect(c))
+    suma = caja.sum(axis=1)
+    dif = caja[:, 1] - caja[:, 0]
+    arriba_izq = caja[np.argmin(suma)]
+    abajo_der = caja[np.argmax(suma)]
+    arriba_der = caja[np.argmin(dif)]
+    abajo_izq = caja[np.argmax(dif)]
 
-    gris = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY)
-    mask = (gris < 60) if solo_oscuros else (gris < 245)
-    mask = mask.astype(np.uint8) * 255
+    ancho = math.dist(arriba_izq, arriba_der)
+    alto = math.dist(arriba_izq, abajo_izq)
+    angulo = math.degrees(math.atan2(arriba_der[1] - arriba_izq[1],
+                                     arriba_der[0] - arriba_izq[0]))
+    centro_x, centro_y = (arriba_izq + arriba_der + abajo_der + abajo_izq) / 4
 
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((k, k), np.uint8))
-    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:n]
-    if len(cnts) < n:
-        sys.exit(f"Solo encontre {len(cnts)} bloques (se esperaban {n}). Ajusta k o los umbrales.")
-    return sorted(cnts, key=lambda c: cv2.boundingRect(c)[0])
+    foto = foto.convert("RGBA").resize((round(ancho), round(alto)))   # redimensionar
+    foto = foto.rotate(-angulo, expand=True)                          # rotar
+    plantilla.paste(foto, (round(centro_x - foto.width / 2),
+                           round(centro_y - foto.height / 2)), foto)  # pegar
 
+# 5) Mostrar el resultado con Pygame
+pygame.init()
+pantalla = pygame.display.set_mode(plantilla.size)
+pygame.display.set_caption("Proyecto #1 - Parte 2")
+superficie = pygame.image.fromstring(plantilla.tobytes(), plantilla.size, "RGB")
 
-def esquinas(cnt):
-    """Esquinas del rectangulo rotado: arriba-izq, arriba-der, abajo-der, abajo-izq."""
-    box = cv2.boxPoints(cv2.minAreaRect(cnt))
-    s = box.sum(axis=1)
-    d = box[:, 1] - box[:, 0]            # y - x
-    tl, br = box[np.argmin(s)], box[np.argmax(s)]
-    tr, bl = box[np.argmin(d)], box[np.argmax(d)]
-    return tl, tr, br, bl
-
-
-def main():
-    figuras = abrir_rgb(FIGURAS)
-    plantilla = abrir_rgb(PLANTILLA)
-
-    fotos = []
-    for c in detectar_bloques(figuras, solo_oscuros=False):
-        x, y, w, h = cv2.boundingRect(c)
-        fotos.append(figuras.crop((x, y, x + w, y + h)))
-
-    destinos = detectar_bloques(plantilla, solo_oscuros=True)
-
-    salida = plantilla.copy()
-    for i, (foto, cnt) in enumerate(zip(fotos, destinos)):
-        tl, tr, br, bl = esquinas(cnt)
-        ancho = math.dist(tl, tr)
-        alto = math.dist(tl, bl)
-        ang = math.degrees(math.atan2(tr[1] - tl[1], tr[0] - tl[0]))  # horario (y hacia abajo)
-        cx, cy = (tl + tr + br + bl) / 4
-
-        img = foto.convert("RGBA").resize((round(ancho) + 2, round(alto) + 2), Image.LANCZOS)
-        img = img.rotate(-ang, expand=True, resample=Image.BICUBIC)
-        pos = (round(cx - img.width / 2), round(cy - img.height / 2))
-        salida.paste(img, pos, img)      # la mascara alfa evita pegar las esquinas vacias
-        print(f"f{i+1}: lado={ancho:.0f}x{alto:.0f}px  angulo={ang:.1f} grados  centro=({cx:.0f},{cy:.0f})")
-
-    salida.save(SALIDA)
-    print(f"Guardado: {SALIDA}")
-
-    # 4) mostrar con Pygame
-    pygame.init()
-    ancho_v, alto_v = salida.size
-    esc = min(1.0, 1100 / ancho_v, 800 / alto_v)
-    vista = salida.resize((int(ancho_v * esc), int(alto_v * esc)), Image.LANCZOS)
-    pantalla = pygame.display.set_mode(vista.size)
-    pygame.display.set_caption("Proyecto #1 - Parte 2 (ESC para salir)")
-    surf = pygame.image.fromstring(vista.tobytes(), vista.size, "RGB")
-    reloj = pygame.time.Clock()
-    corriendo = True
-    while corriendo:
-        for e in pygame.event.get():
-            if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
-                corriendo = False
-        pantalla.blit(surf, (0, 0))
-        pygame.display.flip()
-        reloj.tick(30)
-    pygame.quit()
-
-
-if __name__ == "__main__":
-    main()
+corriendo = True
+while corriendo:
+    for evento in pygame.event.get():
+        if evento.type == pygame.QUIT:
+            corriendo = False
+    pantalla.blit(superficie, (0, 0))
+    pygame.display.flip()
+pygame.quit()
